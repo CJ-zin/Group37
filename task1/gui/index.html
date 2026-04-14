@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Recycling Hub</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        /* Basic CSS properties setup */
+        :root { --primary: #00796B; --bg: #eceff1; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 0;}
+        .container { display: flex; height: 100vh; overflow: hidden; }
+        .sidebar { background: white; padding: 20px; z-index: 1000; overflow-y: auto; display: flex; flex-direction: column; flex-shrink: 0; }
+        .left-sidebar { width: 380px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
+        .right-sidebar { width: 300px; box-shadow: -2px 0 5px rgba(0,0,0,0.1); background: #fafafa; }
+        #map-container { flex-grow: 1; height: 100vh; position: relative;}
+        #map { height: 100%; width: 100%; }
+        input, select, button { width: 100%; padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box;}
+        button { background: var(--primary); color: white; cursor: pointer; border: none; font-weight: bold;}
+        button:hover { opacity: 0.9; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        .danger-btn { background: #d32f2f; }
+        .warning-btn { background: #f57c00; }
+        .card { background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #eee;}
+        .history { flex-grow: 1; overflow-y: auto; font-size: 0.9em; color: #555; padding-right: 5px; }
+        .history-item { background: #fff; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #e0e0e0; box-shadow: 0 1px 2px rgba(0,0,0,0.05); word-break: break-word; line-height: 1.4; }
+        .tabs { display: flex; margin-bottom: 15px; gap: 5px;}
+        .tab-btn { flex: 1; margin: 0; background: #ddd; color: #333; }
+        .tab-btn.active { background: var(--primary); color: white; }
+        .shop-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #ddd;}
+        .rank-item { display: flex; justify-content: space-between; padding: 8px; background: #fff; margin-bottom: 5px; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+<div id="app" class="container">
+
+    <div class="sidebar left-sidebar">
+        <h2 style="color: var(--primary);">♻️ HK Recycle Pro</h2>
+
+        <div v-if="!isLoggedIn" class="card">
+            <h3>Login / Register</h3>
+            <select v-model="authMode">
+                <option value="login">Login</option>
+                <option value="register">Register</option>
+            </select>
+            <input v-model="auth.id" placeholder="User ID" />
+            <input v-if="authMode==='register'" v-model="auth.name" placeholder="Display Name" />
+            <input type="password" v-model="auth.pwd" placeholder="Password" />
+            <button @click="handleAuth">{{ authMode === 'login' ? 'Login' : 'Register' }}</button>
+        </div>
+
+        <div v-else>
+            <div class="card">
+                <h3>Welcome, {{ user.name }}</h3>
+                <h2 style="color: var(--primary); margin: 5px 0;">{{ Math.round(user.points * 10) / 10 }} pts</h2>
+                <div style="display: flex; gap: 5px; margin-top: 15px;">
+                    <button class="warning-btn" @click="undo">Undo Last</button>
+                    <button @click="editProfile" style="background:#546E7A;">Edit Name</button>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button :class="['tab-btn', currentTab === 'map' ? 'active' : '']" @click="switchTab('map')">Map</button>
+                <button :class="['tab-btn', currentTab === 'shop' ? 'active' : '']" @click="switchTab('shop')">Shop</button>
+                <button :class="['tab-btn', currentTab === 'leaderboard' ? 'active' : '']" @click="switchTab('leaderboard')">Ranking</button>
+            </div>
+
+            <div v-if="currentTab === 'map'" class="card">
+                <h3>Smart Disposal</h3>
+                <p style="font-size:0.85em; color:#666; line-height: 1.5;">Click on the map to set location.<br>Select waste type to find station.</p>
+                <label>Waste Type:</label>
+                <select v-model="dispose.type">
+                    <option v-for="t in wasteTypes" :value="t">{{ t }}</option>
+                </select>
+                <label>Quantity / Weight:</label>
+                <input type="number" v-model="dispose.qty" min="0.1" step="0.1" />
+                <button @click="findAndDispose" :disabled="!userLocation">
+                    {{ userLocation ? 'Find Route & Dispose' : 'Waiting for Map Click...' }}
+                </button>
+            </div>
+
+            <div v-if="currentTab === 'shop'" class="card">
+                <h3>Reward Shop</h3>
+                <div class="shop-item" v-for="item in shopItems" :key="item.id">
+                    <div>
+                        <strong>{{ item.name }}</strong><br>
+                        <span style="color:#f57c00; font-size: 0.9em;">Cost: {{ item.cost }} pts</span>
+                    </div>
+                    <button @click="redeem(item.id)" :disabled="user.points < item.cost" style="width: auto; padding: 5px 10px;">Redeem</button>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'leaderboard'" class="card">
+                <h3>Top Recyclers</h3>
+                <div class="rank-item" v-for="(rank, idx) in leaderboard" :key="idx">
+                    <span><b>#{{ idx + 1 }}</b> {{ rank.name }}</span>
+                    <span style="color: var(--primary); font-weight: bold;">{{ rank.points }} pts</span>
+                </div>
+            </div>
+
+            <button class="danger-btn" @click="logout" style="margin-top: 15px;">Logout</button>
+        </div>
+    </div>
+
+    <div id="map-container">
+        <div id="map"></div>
+    </div>
+
+    <div class="sidebar right-sidebar" v-if="isLoggedIn">
+        <h3 style="color: var(--primary); margin-top: 0;">Activity History</h3>
+        <div class="history">
+            <div class="history-item" v-for="(h, index) in user.history.slice().reverse()" :key="index">{{ h }}</div>
+            <div v-if="user.history.length===0" style="color: #888; text-align: center; margin-top: 20px;">No activities yet.</div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+    createApp({
+        setup() {
+            // Vue 3 reactivity state declarations
+            const isLoggedIn = ref(false);
+            const authMode = ref('login');
+            const auth = reactive({ id: '', name: '', pwd: '' });
+            const user = reactive({ id: '', name: '', points: 0, history: [] });
+            const wasteTypes = ref([]);
+            const dispose = reactive({ type: '', qty: 1 });
+
+            const currentTab = ref('map');
+            const shopItems = ref([]);
+            const leaderboard = ref([]);
+
+            // Leaflet Map Overlays Tracking
+            let map = null;
+            let userMarker = null;
+            let stationMarker = null;
+            let routePolyline = null;
+            let startDashLine = null;
+            let endDashLine = null;
+
+            const userLocation = ref(null);
+
+            onMounted(async () => {
+                // Initialize default map view focused on Hong Kong
+                map = L.map('map').setView([22.3193, 114.1694], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+                // Detect dynamic map click to relocate user pin
+                map.on('click', (e) => {
+                    if (!isLoggedIn.value) return;
+                    userLocation.value = e.latlng;
+                    if (userMarker) map.removeLayer(userMarker);
+                    userMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map).bindPopup("Your Location").openPopup();
+                    clearRoute();
+                });
+
+                // Attach API fetchers immediately once the webview connection mounts
+                window.addEventListener('pywebviewready', async () => {
+                    try {
+                        wasteTypes.value = await window.pywebview.api.get_waste_types();
+                        if (wasteTypes.value && wasteTypes.value.length > 0) dispose.type = wasteTypes.value[0];
+                    } catch (error) { console.error("API failed:", error); }
+                });
+            });
+
+            const clearRoute = () => {
+                // Wipes out old path graphics from previous requests
+                if (stationMarker) map.removeLayer(stationMarker);
+                if (routePolyline) map.removeLayer(routePolyline);
+                if (startDashLine) map.removeLayer(startDashLine);
+                if (endDashLine) map.removeLayer(endDashLine);
+            };
+
+            const switchTab = async (tab) => {
+                // Tab control with conditional backend api fetches
+                currentTab.value = tab;
+                if (tab === 'shop') shopItems.value = await window.pywebview.api.get_shop_items();
+                if (tab === 'leaderboard') leaderboard.value = await window.pywebview.api.get_leaderboard();
+            };
+
+            const refreshUser = async () => {
+                // Polling Python object to sync web UI state
+                const data = await window.pywebview.api.get_user_data();
+                if (data) Object.assign(user, data);
+                if (currentTab.value === 'leaderboard') switchTab('leaderboard');
+            };
+
+            const handleAuth = async () => {
+                // Triggers login or register pipeline inside Python API
+                const res = await window.pywebview.api.auth_user(authMode.value, auth.id, auth.name, auth.pwd);
+                if (res.error) alert(res.error);
+                else {
+                    if (authMode.value === 'register') alert(res.msg);
+                    else {
+                        isLoggedIn.value = true;
+                        refreshUser();
+                        nextTick(() => { setTimeout(() => { if(map) map.invalidateSize(); }, 150); });
+                    }
+                }
+            };
+
+            const findAndDispose = async () => {
+                // Calls Dijkstra logic in backend and paints generated paths via Leaflet
+                if (!userLocation.value) return;
+                const lat = userLocation.value.lat;
+                const lng = userLocation.value.lng;
+
+                const res = await window.pywebview.api.calculate_route_and_dispose(lat, lng, dispose.type, dispose.qty);
+                if (res.error) return alert(res.error);
+
+                clearRoute();
+
+                const popupContent = `<b>${res.station.name}</b><br>
+                    Type: ${res.station.type}<br>
+                    Multiplier: x${res.station.multiplier}<br>
+                    Queue length: ${res.station.queue_len}<br>
+                    Distance: ${res.distance}m`;
+
+                stationMarker = L.marker([res.station.lat, res.station.lng])
+                    .addTo(map).bindPopup(popupContent).openPopup();
+
+                routePolyline = L.polyline(res.path_coords, {color: 'blue', weight: 4}).addTo(map);
+
+                if (res.path_coords && res.path_coords.length > 0) {
+                    startDashLine = L.polyline([[lat, lng], res.path_coords[0]], {color: '#555', weight: 3, dashArray: '5, 8'}).addTo(map);
+                    endDashLine = L.polyline([res.path_coords[res.path_coords.length - 1], [res.station.lat, res.station.lng]], {color: '#555', weight: 3, dashArray: '5, 8'}).addTo(map);
+                    const group = new L.featureGroup([routePolyline, startDashLine, endDashLine, stationMarker, userMarker]);
+                    map.fitBounds(group.getBounds(), {padding: [50, 50]});
+                }
+
+                alert(`Success! Handled via OOP models. Earned ${res.earned_points.toFixed(1)} points.`);
+                refreshUser();
+            };
+
+            const redeem = async (itemId) => {
+                // Purchases shop item via points
+                const res = await window.pywebview.api.redeem_item(itemId);
+                alert(res.error ? res.error : res.msg);
+                refreshUser();
+            };
+
+            const undo = async () => {
+                // Uses stack logic from backend to undo last disposal entry
+                const res = await window.pywebview.api.undo_action();
+                alert(res.msg);
+                refreshUser();
+            };
+
+            const editProfile = async () => {
+                // Prompts to rename username
+                const newName = prompt("Enter new name:", user.name);
+                if (newName) { await window.pywebview.api.update_profile(newName); refreshUser(); }
+            };
+
+            const logout = () => {
+                // Resets frontend user session details
+                isLoggedIn.value = false;
+                userLocation.value = null;
+                currentTab.value = 'map';
+                clearRoute();
+            };
+
+            return { isLoggedIn, authMode, auth, user, wasteTypes, dispose, userLocation, currentTab, shopItems, leaderboard, handleAuth, switchTab, findAndDispose, redeem, undo, editProfile, logout };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
