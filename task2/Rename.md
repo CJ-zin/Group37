@@ -3,6 +3,7 @@ Self-Study Report: Graph Data Structure and Dijkstra's Shortest Path Algorithm
 1. Introduction
 
 In this course, we have covered fundamental data structures such as stacks, queues, linked lists, and binary search trees, as well as classic algorithms including merge sort and bubble sort. To expand our knowledge boundaries, this self-study focuses on an in-depth investigation of the Graph—a non-linear data structure—and Dijkstra's Shortest Path Algorithm. Graphs excel at modeling complex relationships between objects, while Dijkstra's algorithm is a foundational greedy approach for solving shortest path problems in such networks. Both have wide-ranging applications in navigation, social networks, and resource scheduling.
+
 2. Data Structure: Graph
 
 2.1 Abstract Data Type (ADT) Definition
