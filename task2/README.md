@@ -26,7 +26,7 @@ python .\code.py --graph-file .\sample_graph.json --start A
 
 ## Video Link
 
-- 5-minute introduction video: [Insert your video URL here]
+- 5-minute introduction video: [https://www.bilibili.com/video/BV1tpdvBSEtc/?vd_source=315e748f4594bd478154f8067b34da3b]
 
 ## Notes
 
